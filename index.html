@@ -4,24 +4,45 @@
 <meta charset="UTF-8">
 <title>เกมทายตัวเลขออนไลน์</title>
 
-<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
-
 <style>
 body {
     background:#111;
     color:white;
     text-align:center;
     font-family:sans-serif;
-    margin-top:50px;
+    margin-top:30px;
 }
-input, button, select {
+input, button {
     padding:10px;
     font-size:16px;
     margin:5px;
 }
-#result { font-size:22px; margin-top:20px; }
-#score { margin-top:10px; }
+#result { margin-top:10px; font-size:18px; }
+.good { color:#4caf50; }
+.bad { color:#f44336; }
+
+#log, #chatBox {
+    max-width:420px;
+    margin:10px auto;
+    background:#222;
+    padding:10px;
+    text-align:left;
+    border:1px solid #444;
+}
+#log { min-height:80px; }
+#chatBox {
+    height:180px;
+    overflow-y:auto;
+}
+
+table {
+    margin:auto;
+    border-collapse:collapse;
+}
+td, th {
+    border:1px solid #555;
+    padding:6px 12px;
+}
 </style>
 </head>
 
@@ -30,24 +51,42 @@ input, button, select {
 <h1>🎲 เกมทายตัวเลขออนไลน์</h1>
 
 <input id="name" placeholder="ชื่อมึง">
-<select id="room">
-    <option value="room1">ห้อง 1</option>
-    <option value="room2">ห้อง 2</option>
-    <option value="room3">ห้อง 3</option>
-</select>
+<br>
+<input id="room" placeholder="รหัสห้อง">
 <br>
 
-<input type="number" id="guess" placeholder="เดาเลข 1-100">
-<br>
+<button onclick="createRoom()">สร้างห้อง</button>
+<button onclick="resetServer()">รีเซ็ตห้อง (แอดมิน)</button>
 
+<br><br>
+
+<input type="number" id="guess" placeholder="เลขที่เดา">
+<br>
 <button onclick="check()">เดาเลยไอ้สัส</button>
-<button onclick="resetGame()">รีเซ็ตรอบ 🔄</button>
 
 <div id="result"></div>
-<div id="score"></div>
 
-<script>
-/* Firebase config */
+<div id="log"><b>📜 ประวัติการเดา</b></div>
+
+<h2>🏆 ตารางคะแนน</h2>
+<table>
+<thead>
+<tr><th>อันดับ</th><th>ชื่อ</th><th>แต้ม</th></tr>
+</thead>
+<tbody id="leaderboard"></tbody>
+</table>
+
+<h2>💬 แชทในห้อง</h2>
+<div id="chatBox"></div>
+<input id="chatInput" placeholder="พิมพ์ด่าหรือคุย">
+<button onclick="sendChat()">ส่ง</button>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+import {
+  getDatabase, ref, set, get, remove, onValue, push
+} from "https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js";
+
 const firebaseConfig = {
   apiKey: "AIzaSyDRlB6q1NJeSnO4JsLQcUHr28XGKo573sk",
   authDomain: "peem-dc962.firebaseapp.com",
@@ -58,88 +97,144 @@ const firebaseConfig = {
   appId: "1:1021248731842:web:0e8b4ec8e0f51e0578595b"
 };
 
-firebase.initializeApp(firebaseConfig);
-const db = firebase.database();
+const app = initializeApp(firebaseConfig);
+const db = getDatabase(app);
+const ADMIN_PASSWORD = "1234";
 
-let answer = 0;
+const nameVal = () => document.getElementById("name").value;
+const roomVal = () => document.getElementById("room").value;
+const guessVal = () => document.getElementById("guess").value;
+const roomPath = r => `rooms/${r}`;
 
-function getRoomPath() {
-    return "rooms/" + document.getElementById("room").value;
-}
-
-/* ฟังค่าจากห้อง */
-function listenRoom() {
-    const path = getRoomPath();
-
-    db.ref(path + "/answer").on("value", snap => {
-        if (snap.exists()) answer = snap.val();
-    });
-
-    db.ref(path + "/winner").on("value", snap => {
-        if (snap.exists()) {
-            document.getElementById("result").innerText =
-                "ผู้ชนะรอบนี้: " + snap.val();
-        }
-    });
-
-    db.ref(path + "/scores").on("value", snap => {
-        let text = "คะแนน:\n";
-        snap.forEach(s => {
-            text += s.key + " = " + s.val() + " | ";
-        });
-        document.getElementById("score").innerText = text;
-    });
-}
-
-listenRoom();
-
-document.getElementById("room").addEventListener("change", () => {
-    listenRoom();
-});
-
-/* เดา */
-function check() {
-    const name = document.getElementById("name").value;
-    const g = document.getElementById("guess").value;
-    const path = getRoomPath();
-
-    if (name === "" || g === "") {
-        document.getElementById("result").innerText =
-            "กรอกชื่อกับเลขก่อนดิไอ้เหี้ย";
-        return;
-    }
-
-    if (g > answer) {
-        document.getElementById("result").innerText = "มากไปเว้ย";
-    } else if (g < answer) {
-        document.getElementById("result").innerText = "น้อยไปวะ";
-    } else {
-        document.getElementById("result").innerText =
-            "ถูกแล้วไอ้เหี้ย 🎉";
-
-        const scoreRef = db.ref(path + "/scores/" + name);
-        scoreRef.get().then(snap => {
-            let score = snap.exists() ? snap.val() : 0;
-            scoreRef.set(score + 1);
-        });
-
-        db.ref(path + "/winner").set(name);
-        db.ref(path + "/status").set("finished");
-    }
-}
-
-/* รีเซ็ต */
-function resetGame() {
-    const path = getRoomPath();
-    const newAnswer = Math.floor(Math.random() * 100) + 1;
-
-    db.ref(path + "/answer").set(newAnswer);
-    db.ref(path + "/winner").remove();
-    db.ref(path + "/status").set("playing");
-
+// ===== ลิงก์เชิญ =====
+const params = new URLSearchParams(window.location.search);
+const inviteRoom = params.get("room");
+if (inviteRoom) {
+    document.getElementById("room").value = inviteRoom;
     document.getElementById("result").innerText =
-        "เริ่มรอบใหม่แล้วโว้ย 🔥";
+        `เข้าห้อง ${inviteRoom} จากลิงก์เชิญ`;
 }
+
+// ===== สร้างห้อง =====
+window.createRoom = async function () {
+    const name = nameVal();
+    if (!name) return alert("ใส่ชื่อก่อนดิไอ้เหี้ย");
+
+    const roomCode = Math.random().toString(36).substring(2,8).toUpperCase();
+    document.getElementById("room").value = roomCode;
+
+    await set(ref(db, roomPath(roomCode)), {
+        answer: Math.floor(Math.random()*100)+1,
+        scores:{},
+        log:{},
+        chat:{}
+    });
+
+    const link = `${location.origin}${location.pathname}?room=${roomCode}`;
+    document.getElementById("result").innerHTML =
+        `สร้างห้อง <b>${roomCode}</b><br>
+         ลิงก์เชิญ:<br>
+         <a href="${link}" target="_blank">${link}</a>`;
+};
+
+// ===== เดาเลข =====
+window.check = async function () {
+    const room = roomVal(), name = nameVal(), g = guessVal();
+    if (!room || !name || !g) return;
+
+    const gameRef = ref(db, roomPath(room));
+    const snap = await get(gameRef);
+    if (!snap.exists()) return;
+
+    const answer = snap.val().answer;
+
+    if (g == answer) {
+        document.getElementById("result").innerHTML =
+            `<span class="good">🎉 ${name} เดาถูก (${g})</span>`;
+
+        const scoreRef = ref(db, `${roomPath(room)}/scores/${name}`);
+        const s = await get(scoreRef);
+        await set(scoreRef, s.exists()? s.val()+1 : 1);
+
+        await push(ref(db, `${roomPath(room)}/log`),
+            `🎉 ${name} เดาถูก (${g})`
+        );
+
+        await remove(gameRef);
+    } else if (g < answer) {
+        await push(ref(db, `${roomPath(room)}/log`),
+            `❌ ${name} เดา ${g} → น้อยไป`
+        );
+    } else {
+        await push(ref(db, `${roomPath(room)}/log`),
+            `❌ ${name} เดา ${g} → มากไป`
+        );
+    }
+
+    document.getElementById("guess").value = "";
+};
+
+// ===== แชท =====
+window.sendChat = async function () {
+    const room = roomVal(), name = nameVal();
+    const msg = document.getElementById("chatInput").value;
+    if (!room || !name || !msg) return;
+
+    await push(ref(db, `${roomPath(room)}/chat`), {
+        name, text: msg, time: Date.now()
+    });
+
+    document.getElementById("chatInput").value = "";
+};
+
+// ===== รีเซ็ต =====
+window.resetServer = async function () {
+    const pass = prompt("ใส่รหัสแอดมิน");
+    if (pass !== ADMIN_PASSWORD) return alert("รหัสผิดไอ้เหี้ย");
+
+    await remove(ref(db, roomPath(roomVal())));
+    document.getElementById("result").innerText = "รีเซ็ตห้องแล้ว 💣";
+};
+
+// ===== realtime update =====
+onValue(ref(db), snap => {
+    const room = roomVal();
+    if (!room) return;
+
+    const data = snap.child(roomPath(room)).val();
+    if (!data) return;
+
+    // log
+    const logDiv = document.getElementById("log");
+    logDiv.innerHTML = "<b>📜 ประวัติการเดา</b>";
+    if (data.log) {
+        Object.values(data.log).slice(-6).forEach(t=>{
+            logDiv.innerHTML += `<div>- ${t}</div>`;
+        });
+    }
+
+    // leaderboard
+    const board = document.getElementById("leaderboard");
+    board.innerHTML = "";
+    if (data.scores) {
+        Object.entries(data.scores)
+          .sort((a,b)=>b[1]-a[1])
+          .forEach((v,i)=>{
+            board.innerHTML +=
+              `<tr><td>${i+1}</td><td>${v[0]}</td><td>${v[1]}</td></tr>`;
+          });
+    }
+
+    // chat
+    const chatBox = document.getElementById("chatBox");
+    chatBox.innerHTML = "";
+    if (data.chat) {
+        Object.values(data.chat).slice(-20).forEach(c=>{
+            chatBox.innerHTML += `<div><b>${c.name}:</b> ${c.text}</div>`;
+        });
+        chatBox.scrollTop = chatBox.scrollHeight;
+    }
+});
 </script>
 
 </body>
